@@ -1,12 +1,11 @@
 package com.example.api
 
 import akka.event.Logging._
-import akka.http.scaladsl.model.{HttpResponse, StatusCodes}
+import akka.http.scaladsl.model.{ HttpResponse, StatusCodes }
 import akka.http.scaladsl.server.Directives._
-import akka.http.scaladsl.server.{Directives, Route}
+import akka.http.scaladsl.server.{ Directives, Route }
 import akka.http.interop._
 import akka.http.scaladsl.model.StatusCodes.NoContent
-import play.api.libs.json.JsObject
 import zio._
 import zio.logging._
 import com.example.api.healthcheck.HealthCheckService
@@ -20,16 +19,17 @@ import akka.stream.scaladsl.{ Flow, Sink }
 import akka.actor.ActorSystem
 import akka.http.javadsl.model.ws.BinaryMessage
 import akka.http.scaladsl.model.ws.{ Message, TextMessage }
-import scala.util.{ Try, Success, Failure }
-
+import scala.util.{ Failure, Success, Try }
+import de.heikoseeberger.akkahttpziojson.ZioJsonSupport
 trait Api {
   def routes: Route
 }
 
 object Api {
-
-  val live: ZLayer[Has[HttpServer.Config] with Has[ActorSystem]
-    with Has[ApplicationService] with Logging with Has[HealthCheckService], Nothing, Has[Api]] = ZLayer.fromFunction(env =>
+  import ZioJsonSupport._
+  val live: ZLayer[Has[HttpServer.Config] with Has[ActorSystem] with Has[ApplicationService] with Logging with Has[
+    HealthCheckService
+  ], Nothing, Has[Api]] = ZLayer.fromFunction(env =>
     new Api with JsonSupport with ZIOSupport {
 
       def routes: Route = itemRoute
@@ -63,42 +63,41 @@ object Api {
                 }
               }
             } ~
-            path(LongNumber) {
-              itemId =>
-                delete {
+            path(LongNumber) { itemId =>
+              delete {
+                complete(
+                  ApplicationService
+                    .deleteItem(ItemId(itemId))
+                    .provide(env)
+                    .as(EmptyResponse()) // is there something analogous to JsObject.empty ?
+                )
+              } ~
+              get {
+                complete(ApplicationService.getItem(ItemId(itemId)).provide(env))
+              } ~
+              patch {
+                entity(Directives.as[PartialUpdateItemRequest]) { req =>
                   complete(
                     ApplicationService
-                      .deleteItem(ItemId(itemId))
+                      .partialUpdateItem(ItemId(itemId), req.name, req.price)
                       .provide(env)
-                      .as(JsObject.empty)
+                      .as(EmptyResponse())
                   )
-                } ~
-                get {
-                  complete(ApplicationService.getItem(ItemId(itemId)).provide(env))
-                } ~
-                patch {
-                  entity(Directives.as[PartialUpdateItemRequest]) { req =>
-                    complete(
-                      ApplicationService
-                        .partialUpdateItem(ItemId(itemId), req.name, req.price)
-                        .provide(env)
-                        .as(JsObject.empty)
-                    )
-                  }
-                } ~
-                put {
-                  entity(Directives.as[UpdateItemRequest]) { req =>
-                    complete(
-                      ApplicationService
-                        .updateItem(ItemId(itemId), req.name, req.price)
-                        .provide(env)
-                        .as(JsObject.empty)
-                    )
-                  }
                 }
+              } ~
+              put {
+                entity(Directives.as[UpdateItemRequest]) { req =>
+                  complete(
+                    ApplicationService
+                      .updateItem(ItemId(itemId), req.name, req.price)
+                      .provide(env)
+                      .as(EmptyResponse())
+                  )
+                }
+              }
             }
           }
-        }  ~
+        } ~
           pathPrefix("sse" / "items") {
             import akka.http.scaladsl.marshalling.sse.EventStreamMarshalling._
 
@@ -118,7 +117,7 @@ object Api {
                 }
               }
             }
-          }   ~
+          } ~
           pathPrefix("ws" / "items") {
             logRequestResult(("ws/items", InfoLevel)) {
               val greeterWebSocketService =
@@ -135,7 +134,7 @@ object Api {
                           .provide(env)
                       )
                     )
-                  case tm: TextMessage =>
+                  case tm: TextMessage                                  =>
                     Try(tm.getStrictText.toLong) match {
                       case Success(value) =>
                         Source.futureSource(
@@ -149,9 +148,9 @@ object Api {
                               .provide(env)
                           )
                         )
-                      case Failure(_) => Source.empty
+                      case Failure(_)     => Source.empty
                     }
-                  case bm: BinaryMessage =>
+                  case bm: BinaryMessage                                =>
                     bm.getStreamedData.runWith(Sink.ignore, env.get[ActorSystem])
                     Source.empty
                 }

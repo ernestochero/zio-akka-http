@@ -2,28 +2,35 @@ package com.example.api.graphql
 
 import akka.actor.ActorSystem
 import akka.http.scaladsl.model._
-import com.example.api.graphql.GraphQLApi
 import com.example.application.ApplicationService
 import com.example.domain.{ InMemoryItemRepository, Item, ItemId }
 import com.example.infrastructure.InMemoryEventSubscriber
 import com.example.interop.akka.ZioRouteTest
-import de.heikoseeberger.akkahttpplayjson.PlayJsonSupport
-import play.api.libs.json._
 import zio._
 import zio.blocking._
 import zio.clock.Clock
+import zio.json._
+import zio.json.ast.Json
 import zio.logging.Logging
 import zio.test.Assertion._
 import zio.test._
 import zio.test.TestAspect.sequential
+import de.heikoseeberger.akkahttpziojson.ZioJsonSupport
 
-trait GraphQLApiSpecJsonProtocol extends PlayJsonSupport {
-  implicit val itemIdFormat = Json.valueFormat[ItemId]
-  implicit val itemFormat   = Json.format[Item]
+sealed trait Operation
+case class AllItems(allItems: List[Item])
+case class ItemByName(itemByName: List[Item])
+case class CheaperThan(cheaperThan: List[Item])
+trait GraphQLApiSpecJsonProtocol {
+  implicit val itemIdDecoder: JsonDecoder[ItemId]           = JsonDecoder[Long].map(ItemId)
+  implicit val itemDecoder: JsonDecoder[Item]               = DeriveJsonDecoder.gen[Item]
+  implicit val itemsDecoder: JsonDecoder[AllItems]          = DeriveJsonDecoder.gen[AllItems]
+  implicit val itemsByNameDecoder: JsonDecoder[ItemByName]  = DeriveJsonDecoder.gen[ItemByName]
+  implicit val cheaperThanDecoder: JsonDecoder[CheaperThan] = DeriveJsonDecoder.gen[CheaperThan]
 }
 
 object GraphQLApiSpec extends ZioRouteTest with GraphQLApiSpecJsonProtocol {
-
+  import ZioJsonSupport._
   def spec =
     (suite("GraphQLApi must")(
       testM("Add item on call to 'addItem'") {
@@ -41,10 +48,10 @@ object GraphQLApiSpec extends ZioRouteTest with GraphQLApiSpecJsonProtocol {
         sendQueryAndCheckResult(query) { (statusCode, contentType, body) =>
           val itemId =
             for {
-              jsonData     <- body.value.get("data")
-              jsObjectData <- jsonData.asOpt[JsObject]
-              jsonAddItem  <- jsObjectData.value.get("addItem")
-              id           <- jsonAddItem.asOpt[BigDecimal]
+              jsonData     <- body.fields.toMap.get("data")
+              jsObjectData <- jsonData.as[Json.Obj].toOption
+              jsonAddItem  <- jsObjectData.fields.toMap.get("addItem")
+              id           <- jsonAddItem.as[BigDecimal].toOption
             } yield id
           assert(statusCode)(equalTo(StatusCodes.OK)) &&
           assert(contentType)(equalTo(ContentTypes.`application/json`)) &&
@@ -59,7 +66,7 @@ object GraphQLApiSpec extends ZioRouteTest with GraphQLApiSpecJsonProtocol {
             |}
             |""".stripMargin
         sendQueryAndCheckResult(query) { (statusCode, contentType, body) =>
-          val allItems = getItemsFromBody(body, "allItems")
+          val allItems = getDataTypeFromBody[AllItems](body).map(_.allItems)
           assert(statusCode)(equalTo(StatusCodes.OK)) &&
           assert(contentType)(equalTo(ContentTypes.`application/json`)) &&
           assert(allItems)(isSome(equalTo(List(Item(ItemId(0), "Test item", 10)))))
@@ -77,10 +84,10 @@ object GraphQLApiSpec extends ZioRouteTest with GraphQLApiSpecJsonProtocol {
         sendQueryAndCheckResult(query) { (statusCode, contentType, body) =>
           val item =
             for {
-              jsonData     <- body.value.get("data")
-              jsObjectData <- jsonData.asOpt[JsObject]
-              jsonItem     <- jsObjectData.value.get("item")
-              item         <- jsonItem.asOpt[Item]
+              jsonData     <- body.fields.toMap.get("data")
+              jsObjectData <- jsonData.as[Json.Obj].toOption
+              jsonItem     <- jsObjectData.fields.toMap.get("item")
+              item         <- jsonItem.as[Item].toOption
             } yield item
           assert(statusCode)(equalTo(StatusCodes.OK)) &&
           assert(contentType)(equalTo(ContentTypes.`application/json`)) &&
@@ -99,13 +106,13 @@ object GraphQLApiSpec extends ZioRouteTest with GraphQLApiSpecJsonProtocol {
         sendQueryAndCheckResult(query) { (statusCode, contentType, body) =>
           val jsonItem =
             for {
-              jsonData     <- body.value.get("data")
-              jsObjectData <- jsonData.asOpt[JsObject]
-              jsonItem     <- jsObjectData.value.get("item")
+              jsonData     <- body.fields.toMap.get("data")
+              jsObjectData <- jsonData.as[Json.Obj].toOption
+              jsonItem     <- jsObjectData.fields.toMap.get("item")
             } yield jsonItem
           assert(statusCode)(equalTo(StatusCodes.OK)) &&
           assert(contentType)(equalTo(ContentTypes.`application/json`)) &&
-          assert(jsonItem)(isSome(equalTo(JsNull)))
+          assert(jsonItem)(isSome(equalTo(Json.Null)))
         }
       },
       testM("Return all items with the given name, on call to 'itemByName'") {
@@ -118,7 +125,7 @@ object GraphQLApiSpec extends ZioRouteTest with GraphQLApiSpecJsonProtocol {
             |""".stripMargin
 
         sendQueryAndCheckResult(query) { (statusCode, contentType, body) =>
-          val items = getItemsFromBody(body, "itemByName")
+          val items = getDataTypeFromBody[ItemByName](body).map(_.itemByName)
           assert(statusCode)(equalTo(StatusCodes.OK)) &&
           assert(contentType)(equalTo(ContentTypes.`application/json`)) &&
           assert(items)(isSome(equalTo(List(Item(ItemId(0), "Test item", 10)))))
@@ -134,7 +141,7 @@ object GraphQLApiSpec extends ZioRouteTest with GraphQLApiSpecJsonProtocol {
             |""".stripMargin
 
         sendQueryAndCheckResult(query) { (statusCode, contentType, body) =>
-          val items = getItemsFromBody(body, "itemByName")
+          val items = getDataTypeFromBody[ItemByName](body).map(_.itemByName)
           assert(statusCode)(equalTo(StatusCodes.OK)) &&
           assert(contentType)(equalTo(ContentTypes.`application/json`)) &&
           assert(items)(isSome(isEmpty))
@@ -150,7 +157,7 @@ object GraphQLApiSpec extends ZioRouteTest with GraphQLApiSpecJsonProtocol {
             |""".stripMargin
 
         sendQueryAndCheckResult(query) { (statusCode, contentType, body) =>
-          val items = getItemsFromBody(body, "cheaperThan")
+          val items = getDataTypeFromBody[CheaperThan](body).map(_.cheaperThan)
           assert(statusCode)(equalTo(StatusCodes.OK)) &&
           assert(contentType)(equalTo(ContentTypes.`application/json`)) &&
           assert(items)(isSome(equalTo(List(Item(ItemId(0), "Test item", 10)))))
@@ -166,7 +173,7 @@ object GraphQLApiSpec extends ZioRouteTest with GraphQLApiSpecJsonProtocol {
             |""".stripMargin
 
         sendQueryAndCheckResult(query) { (statusCode, contentType, body) =>
-          val items = getItemsFromBody(body, "cheaperThan")
+          val items = getDataTypeFromBody[CheaperThan](body).map(_.cheaperThan)
           assert(statusCode)(equalTo(StatusCodes.OK)) &&
           assert(contentType)(equalTo(ContentTypes.`application/json`)) &&
           assert(items)(isSome(isEmpty))
@@ -211,38 +218,36 @@ object GraphQLApiSpec extends ZioRouteTest with GraphQLApiSpecJsonProtocol {
   }
 
   private val env: ULayer[Has[GraphQLApi]] =
-      ((InMemoryEventSubscriber.test ++ InMemoryItemRepository.test) >>> ApplicationService.live ++ systemLayer ++ Clock.live ++ Logging.ignore)  >>> GraphQLApi.live.orDie
+    ((InMemoryEventSubscriber.test ++ InMemoryItemRepository.test) >>> ApplicationService.live ++ systemLayer ++ Clock.live ++ Logging.ignore) >>> GraphQLApi.live.orDie
 
   private def sendQueryAndCheckResult(query: String)(
-    assertion: (StatusCode, ContentType, JsObject) => TestResult
+    assertion: (StatusCode, ContentType, Json.Obj) => TestResult
   ): ZIO[Blocking with Has[GraphQLApi], Throwable, TestResult] =
     for {
-      routes  <- GraphQLApi.routes
-      request = Post("/api/graphql").withEntity(HttpEntity(ContentTypes.`application/json`, query))
+      routes      <- GraphQLApi.routes
+      request      = Post("/api/graphql").withEntity(HttpEntity(ContentTypes.`application/json`, query))
       resultCheck <- effectBlocking {
-                      request ~> routes ~> check {
-                        val statusCode = status
-                        val ct         = contentType
-                        val body       = entityAs[JsObject]
-                        assertion(statusCode, ct, body)
-                      }
-                    }
+                       request ~> routes ~> check {
+                         val statusCode = status
+                         val ct         = contentType
+                         val body       = entityAs[Json.Obj]
+                         assertion(statusCode, ct, body)
+                       }
+                     }
     } yield resultCheck
 
-  private def getItemsFromBody(body: JsObject, key: String): Option[List[Item]] =
+  private def getDataTypeFromBody[T](body: Json.Obj)(implicit decoder: JsonDecoder[T]): Option[T] =
     for {
-      jsonData     <- body.value.get("data")
-      jsObjectData <- jsonData.asOpt[JsObject]
-      jsonAllItems <- jsObjectData.value.get(key)
-      items        <- jsonAllItems.asOpt[List[Item]]
-    } yield items
+      jsonData     <- body.fields.toMap.get("data")
+      jsObjectData <- jsonData.as[T].toOption
+    } yield jsObjectData
 
-  private def getKeysFromBody(body: JsObject, key: String): Option[collection.Set[String]] =
+  private def getKeysFromBody(body: Json.Obj, key: String): Option[collection.Set[String]] =
     for {
-      jsonData           <- body.value.get("data")
-      jsObjectData       <- jsonData.asOpt[JsObject]
-      jsonDeleteItem     <- jsObjectData.value.get(key)
-      jsObjectDeleteItem <- jsonDeleteItem.asOpt[JsObject]
-      keys               = jsObjectDeleteItem.keys
+      jsonData           <- body.fields.toMap.get("data")
+      jsObjectData       <- jsonData.as[Json.Obj].toOption
+      jsonDeleteItem     <- jsObjectData.fields.toMap.get(key)
+      jsObjectDeleteItem <- jsonDeleteItem.as[Json.Obj].toOption
+      keys                = jsObjectDeleteItem.fields.map(_._1).toSet
     } yield keys
 }

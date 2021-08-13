@@ -13,7 +13,7 @@ val zioSlickInterop       = "0.3.0"
 val zioAkkaHttpInterop    = "0.4.0"
 val akkaHttpPlayJson      = "1.37.0"
 val calibanVersion        = "1.1.1"
-
+val zioJsonVersion        = "0.1.5"
 val dockerReleaseSettings = Seq(
   dockerExposedPorts := Seq(8080),
   dockerExposedVolumes := Seq("/opt/docker/logs"),
@@ -32,11 +32,11 @@ val root = (project in file("."))
         scalaVersion := "2.13.6"
       )
     ),
-    name := "uftestcopy",
+    name := "uftest",
     addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1"),
     libraryDependencies ++= Seq(
       "com.typesafe.akka"     %% "akka-http"                       % akkaHttpVersion,
-      "de.heikoseeberger"     %% "akka-http-play-json"             % akkaHttpPlayJson,
+      //"de.heikoseeberger"     %% "akka-http-play-json"             % akkaHttpPlayJson,
       "com.typesafe.akka"     %% "akka-actor-typed"                % akkaVersion,
       "com.typesafe.akka"     %% "akka-stream"                     % akkaVersion,
       "com.typesafe.slick"    %% "slick"                           % slickVersion,
@@ -46,20 +46,22 @@ val root = (project in file("."))
       "dev.zio"               %% "zio-config"                      % zioConfigVersion,
       "dev.zio"               %% "zio-config-magnolia"             % zioConfigVersion,
       "dev.zio"               %% "zio-config-typesafe"             % zioConfigVersion,
+      "dev.zio"               %% "zio-json"                        % zioJsonVersion,
+      "de.heikoseeberger"     %% "akka-http-zio-json"              % "1.37.0",
       "io.scalac"             %% "zio-akka-http-interop"           % zioAkkaHttpInterop,
       "io.scalac"             %% "zio-slick-interop"               % zioSlickInterop,
       "dev.zio"               %% "zio-interop-reactivestreams"     % zioRSVersion,
-      "ch.qos.logback"        % "logback-classic"                  % logbackClassicVersion,
+      "ch.qos.logback"         % "logback-classic"                 % logbackClassicVersion,
       "dev.zio"               %% "zio-logging"                     % zioLoggingVersion,
       "dev.zio"               %% "zio-logging-slf4j"               % zioLoggingVersion,
-      "org.postgresql"        % "postgresql"                       % postgresVersion,
-      "org.flywaydb"          % "flyway-core"                      % flywayVersion,
+      "org.postgresql"         % "postgresql"                      % postgresVersion,
+      "org.flywaydb"           % "flyway-core"                     % flywayVersion,
       "com.github.ghostdogpr" %% "caliban"                         % calibanVersion,
       "com.github.ghostdogpr" %% "caliban-akka-http"               % calibanVersion,
-      "com.typesafe.akka"     %% "akka-http-testkit"               % akkaHttpVersion % Test,
-      "com.typesafe.akka"     %% "akka-stream-testkit"             % akkaVersion % Test,
-      "com.typesafe.akka"     %% "akka-actor-testkit-typed"        % akkaVersion % Test,
-      "dev.zio"               %% "zio-test-sbt"                    % zioVersion % Test,
+      "com.typesafe.akka"     %% "akka-http-testkit"               % akkaHttpVersion       % Test,
+      "com.typesafe.akka"     %% "akka-stream-testkit"             % akkaVersion           % Test,
+      "com.typesafe.akka"     %% "akka-actor-testkit-typed"        % akkaVersion           % Test,
+      "dev.zio"               %% "zio-test-sbt"                    % zioVersion            % Test,
       "com.dimafeng"          %% "testcontainers-scala-postgresql" % testContainersVersion % It
     ),
     testFrameworks := Seq(new TestFramework("zio.test.sbt.ZTestFramework")),
